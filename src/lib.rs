@@ -96,6 +96,33 @@ impl Contract {
         self.exchange_price_in_yocto_near = new_price_in_yocto_nears;
         log!("Exchange price has been changed to the new value (in yoctoNEARS) of {:?}", new_price_in_yocto_nears)
     }
+
+    // TODO: test coverage
+    pub fn charge_users(&mut self, charge_list: Vec<(ValidAccountId, Balance)>) {
+        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
+        for (valid_account_id, balance_to_burn) in charge_list.iter() {
+            let account_id: String = valid_account_id.clone().into();
+            let account_available_balance = self.token.accounts.get(&account_id).unwrap_or(0);
+            if account_available_balance >= *balance_to_burn {
+                self.token.internal_withdraw(&account_id, *balance_to_burn);
+                log!(
+                    "Account @{} charged for {} ${}",
+                    account_id,
+                    balance_to_burn,
+                    &self.metadata.get().unwrap().symbol,
+                );
+            } else {
+                self.token.internal_withdraw(&account_id, account_available_balance);
+                log!(
+                    "Account @{} charged for entire balance ({}). Supposed to charge {} ${}",
+                    account_id,
+                    account_available_balance,
+                    balance_to_burn,
+                    &self.metadata.get().unwrap().symbol,
+                );
+            }
+        }
+    }
 }
 
 // * VIEW methods *
