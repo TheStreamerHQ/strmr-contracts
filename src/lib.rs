@@ -84,6 +84,7 @@ impl FungibleTokenMetadataProvider for Contract {
 // * OWNER methods *
 #[near_bindgen]
 impl Contract {
+    /// Create additional provided amount of FT tokens in circulation
     pub fn print_tokens(&mut self, amount: U128) {
         assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
         let tokens_to_print: u128 = amount.into();
@@ -91,13 +92,14 @@ impl Contract {
         log!("{} tokens were printed and deposited to owner's account", tokens_to_print);
     }
 
+    /// Set a new exchange price for FT token
     pub fn replace_exchange_price(&mut self, new_price_in_yocto_nears: U128) {
         assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
         self.exchange_price_in_yocto_near = new_price_in_yocto_nears;
         log!("Exchange price has been changed to the new value (in yoctoNEARS) of {:?}", new_price_in_yocto_nears)
     }
 
-    // TODO: test coverage
+    /// Charge specified users for a specified amount of FT tokens
     pub fn charge_users(&mut self, charge_list: Vec<(ValidAccountId, Balance)>) {
         assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
         for (valid_account_id, balance_to_burn) in charge_list.iter() {
@@ -128,13 +130,16 @@ impl Contract {
 // * VIEW methods *
 #[near_bindgen]
 impl Contract {
+    /// Show the current exchange price
     pub fn exchange_price(&self) -> U128 {
         self.exchange_price_in_yocto_near
     }
 }
 
+// * PUBLIC methods *
 #[near_bindgen]
 impl Contract {
+    /// Exchange NEAR tokens for FT tokens based on current exchange price
     #[payable]
     pub fn buy_ft_tokens(&mut self) {
         let attached_deposit = env::attached_deposit();
@@ -393,5 +398,77 @@ mod tests {
         contract.buy_ft_tokens();
 
         assert_eq!(contract.ft_balance_of(accounts(2)).0, 10);
+    }
+
+    #[test]
+    fn test_charge_users() {
+        // We want to buy 10 ft_tokens
+        let deposit_to_attach: u128 = EXCHANGE_PRICE * 10;
+        let mut context = get_context(accounts(2));
+        testing_env!(context.build());
+        let mut contract = Contract::new(
+            accounts(1).into(),
+            TOTAL_SUPPLY.into(),
+            EXCHANGE_PRICE.into(),
+            FungibleTokenMetadata {
+                spec: FT_METADATA_SPEC.to_string(),
+                name: "Example NEAR fungible token".to_string(),
+                symbol: "EXAMPLE".to_string(),
+                icon: Some(DATA_IMAGE_SVG_NEAR_ICON.to_string()),
+                reference: None,
+                reference_hash: None,
+                decimals: 0,
+            });
+
+        // User buys 10 FT tokens
+        testing_env!(context
+            .storage_usage(env::storage_usage())
+            .attached_deposit(contract.storage_balance_bounds().min.into())
+            .predecessor_account_id(accounts(2))
+            .build());
+        // Paying for account registration, aka storage deposit
+        contract.storage_deposit(None, None);
+
+        testing_env!(context
+            .predecessor_account_id(accounts(2))
+            .attached_deposit(deposit_to_attach)
+            .build()
+        );
+        contract.buy_ft_tokens();
+
+        assert_eq!(contract.ft_balance_of(accounts(2)).0, 10);
+
+        testing_env!(context
+            .signer_account_id(accounts(1))
+            .attached_deposit(0)
+            .build()
+        );
+
+        // charge user for 5
+        contract.charge_users(vec![(accounts(2), 5u128)]);
+
+        assert_eq!(contract.ft_balance_of(accounts(2)).0, 5);
+    }
+
+    #[test]
+    fn test_charge_users_by_non_owner_must_fail() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = Contract::new(
+            accounts(1).into(),
+            TOTAL_SUPPLY.into(),
+            EXCHANGE_PRICE.into(),
+            FungibleTokenMetadata {
+                spec: FT_METADATA_SPEC.to_string(),
+                name: "Example NEAR fungible token".to_string(),
+                symbol: "EXAMPLE".to_string(),
+                icon: Some(DATA_IMAGE_SVG_NEAR_ICON.to_string()),
+                reference: None,
+                reference_hash: None,
+                decimals: 0,
+            });
+
+        let result = std::panic::catch_unwind(move || contract.charge_users(vec![(accounts(2), 5u128)]));
+        assert!(result.is_err());
     }
 }
