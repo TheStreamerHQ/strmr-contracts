@@ -16,155 +16,19 @@ NOTES:
     keys on its account.
 */
 use near_contract_standards::fungible_token::metadata::{
-    FungibleTokenMetadata, FungibleTokenMetadataProvider, FT_METADATA_SPEC,
+    FungibleTokenMetadata, FT_METADATA_SPEC,
 };
-use near_contract_standards::fungible_token::FungibleToken;
-use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::LazyOption;
+
 use near_sdk::json_types::{ValidAccountId, U128};
-use near_sdk::{env, log, near_bindgen, AccountId, Balance, PanicOnDefault, PromiseOrValue, Promise};
+use near_sdk::{env, log, near_bindgen, Promise};
+
+use contract::*;
+
+mod contract;
 
 near_sdk::setup_alloc!();
 
-#[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
-pub struct Contract {
-    exchange_price_in_yocto_near: U128,
-    owner_id: AccountId,
-    token: FungibleToken,
-    metadata: LazyOption<FungibleTokenMetadata>,
-}
-
 const DATA_IMAGE_SVG_NEAR_ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 288 288'%3E%3Cg id='l' data-name='l'%3E%3Cpath d='M187.58,79.81l-30.1,44.69a3.2,3.2,0,0,0,4.75,4.2L191.86,103a1.2,1.2,0,0,1,2,.91v80.46a1.2,1.2,0,0,1-2.12.77L102.18,77.93A15.35,15.35,0,0,0,90.47,72.5H87.34A15.34,15.34,0,0,0,72,87.84V201.16A15.34,15.34,0,0,0,87.34,216.5h0a15.35,15.35,0,0,0,13.08-7.31l30.1-44.69a3.2,3.2,0,0,0-4.75-4.2L96.14,186a1.2,1.2,0,0,1-2-.91V104.61a1.2,1.2,0,0,1,2.12-.77l89.55,107.23a15.35,15.35,0,0,0,11.71,5.43h3.13A15.34,15.34,0,0,0,216,201.16V87.84A15.34,15.34,0,0,0,200.66,72.5h0A15.35,15.35,0,0,0,187.58,79.81Z'/%3E%3C/g%3E%3C/svg%3E";
-
-#[near_bindgen]
-impl Contract {
-    /// Initializes the contract with the given total supply owned by the given `owner_id` with
-    /// the given fungible token metadata.
-    #[init]
-    pub fn new(
-        owner_id: ValidAccountId,
-        total_supply: U128,
-        exchange_price_in_yocto_near: U128,
-        metadata: FungibleTokenMetadata,
-    ) -> Self {
-        assert!(!env::state_exists(), "Already initialized");
-        metadata.assert_valid();
-        let mut this = Self {
-            owner_id: owner_id.as_ref().into(),
-            exchange_price_in_yocto_near,
-            token: FungibleToken::new(b"a".to_vec()),
-            metadata: LazyOption::new(b"m".to_vec(), Some(&metadata)),
-        };
-        this.token.internal_register_account(owner_id.as_ref());
-        this.token.internal_deposit(owner_id.as_ref(), total_supply.into());
-        this
-    }
-
-    fn on_account_closed(&mut self, account_id: AccountId, balance: Balance) {
-        log!("Closed @{} with {}", account_id, balance);
-    }
-
-    fn on_tokens_burned(&mut self, account_id: AccountId, amount: Balance) {
-        log!("Account @{} burned {}", account_id, amount);
-    }
-}
-
-near_contract_standards::impl_fungible_token_core!(Contract, token, on_tokens_burned);
-near_contract_standards::impl_fungible_token_storage!(Contract, token, on_account_closed);
-
-#[near_bindgen]
-impl FungibleTokenMetadataProvider for Contract {
-    fn ft_metadata(&self) -> FungibleTokenMetadata {
-        self.metadata.get().unwrap()
-    }
-}
-
-
-// * OWNER methods *
-#[near_bindgen]
-impl Contract {
-    /// Create additional provided amount of FT tokens in circulation
-    pub fn print_tokens(&mut self, amount: U128) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        let tokens_to_print: u128 = amount.into();
-        self.token.internal_deposit(&self.owner_id, tokens_to_print);
-        log!("{} tokens were printed and deposited to owner's account", tokens_to_print);
-    }
-
-    /// Set a new exchange price for FT token
-    pub fn replace_exchange_price(&mut self, new_price_in_yocto_nears: U128) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        self.exchange_price_in_yocto_near = new_price_in_yocto_nears;
-        log!("Exchange price has been changed to the new value (in yoctoNEARS) of {:?}", new_price_in_yocto_nears)
-    }
-
-    /// Charge specified users for a specified amount of FT tokens
-    pub fn charge_users(&mut self, charge_list: Vec<(ValidAccountId, Balance)>) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        for (valid_account_id, balance_to_burn) in charge_list.iter() {
-            let account_id: String = valid_account_id.clone().into();
-            let account_available_balance = self.token.accounts.get(&account_id).unwrap_or(0);
-            if account_available_balance >= *balance_to_burn {
-                self.token.internal_withdraw(&account_id, *balance_to_burn);
-                log!(
-                    "Account @{} charged for {} ${}",
-                    account_id,
-                    balance_to_burn,
-                    &self.metadata.get().unwrap().symbol,
-                );
-            } else {
-                self.token.internal_withdraw(&account_id, account_available_balance);
-                log!(
-                    "Account @{} charged for entire balance ({}). Supposed to charge {} ${}",
-                    account_id,
-                    account_available_balance,
-                    balance_to_burn,
-                    &self.metadata.get().unwrap().symbol,
-                );
-            }
-        }
-    }
-}
-
-// * VIEW methods *
-#[near_bindgen]
-impl Contract {
-    /// Show the current exchange price
-    pub fn exchange_price(&self) -> U128 {
-        self.exchange_price_in_yocto_near
-    }
-}
-
-// * PUBLIC methods *
-#[near_bindgen]
-impl Contract {
-    /// Exchange NEAR tokens for FT tokens based on current exchange price
-    #[payable]
-    pub fn buy_ft_tokens(&mut self) {
-        let attached_deposit = env::attached_deposit();
-        let signer_account_id = env::signer_account_id();
-        // Calculate how many ft_tokens signer can get in exchange for the attached_deposit
-        let affordable_amount: u128 = attached_deposit / self.exchange_price_in_yocto_near.0;
-
-        // Calculate surplus that should be refunded
-        let surplus: u128 = attached_deposit - (affordable_amount * self.exchange_price_in_yocto_near.0);
-        // Transfer bought ft_tokens to the signer
-        self.token.internal_transfer(&self.owner_id, &signer_account_id, affordable_amount, None);
-
-        // Send spent yoctoNEARs to the treasury (self.owner_id)
-        Promise::new(self.owner_id.clone()).transfer(attached_deposit - surplus);
-        // Refund surplus yoctoNEARs to the signer
-        Promise::new(signer_account_id.clone()).transfer(surplus);
-        log!(
-            "Account @{} has bought {} ${} tokens. Refunded {} yoctoNEARS",
-            signer_account_id,
-            affordable_amount,
-            &self.metadata.get().unwrap().symbol,
-            surplus,
-        );
-    }
-}
 
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
