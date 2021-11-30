@@ -22,9 +22,27 @@ use near_contract_standards::fungible_token::FungibleToken;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::LazyOption;
 use near_sdk::json_types::{ValidAccountId, U128};
-use near_sdk::{env, log, near_bindgen, AccountId, Balance, PanicOnDefault, PromiseOrValue, Promise};
+use near_sdk::{env, log, near_bindgen, ext_contract, AccountId, Balance, PanicOnDefault, PromiseOrValue, Promise};
+
+mod owner;
+mod public;
+mod view;
 
 near_sdk::setup_alloc!();
+
+#[ext_contract(ext_owner_methods)]
+pub trait ExtOwnerMethods {
+    fn print_tokens(&mut self, amount: U128);
+
+    fn replace_exchange_price(&mut self, new_price_in_yocto_nears: U128);
+
+    fn charge_users(&mut self, charge_list: Vec<(ValidAccountId, Balance)>);
+}
+
+#[ext_contract(ext_view_methods)]
+pub trait ExtViewMethods {
+    pub fn exchange_price(&self) -> U128;
+}
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
@@ -79,93 +97,6 @@ impl FungibleTokenMetadataProvider for Contract {
         self.metadata.get().unwrap()
     }
 }
-
-
-// * OWNER methods *
-#[near_bindgen]
-impl Contract {
-    /// Create additional provided amount of FT tokens in circulation
-    pub fn print_tokens(&mut self, amount: U128) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        let tokens_to_print: u128 = amount.into();
-        self.token.internal_deposit(&self.owner_id, tokens_to_print);
-        log!("{} tokens were printed and deposited to owner's account", tokens_to_print);
-    }
-
-    /// Set a new exchange price for FT token
-    pub fn replace_exchange_price(&mut self, new_price_in_yocto_nears: U128) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        self.exchange_price_in_yocto_near = new_price_in_yocto_nears;
-        log!("Exchange price has been changed to the new value (in yoctoNEARS) of {:?}", new_price_in_yocto_nears)
-    }
-
-    /// Charge specified users for a specified amount of FT tokens
-    pub fn charge_users(&mut self, charge_list: Vec<(ValidAccountId, Balance)>) {
-        assert_eq!(self.owner_id, env::signer_account_id(), "Signer must be an owner");
-        for (valid_account_id, balance_to_burn) in charge_list.iter() {
-            let account_id: String = valid_account_id.clone().into();
-            let account_available_balance = self.token.accounts.get(&account_id).unwrap_or(0);
-            if account_available_balance >= *balance_to_burn {
-                self.token.internal_withdraw(&account_id, *balance_to_burn);
-                log!(
-                    "Account @{} charged for {} ${}",
-                    account_id,
-                    balance_to_burn,
-                    &self.metadata.get().unwrap().symbol,
-                );
-            } else {
-                self.token.internal_withdraw(&account_id, account_available_balance);
-                log!(
-                    "Account @{} charged for entire balance ({}). Supposed to charge {} ${}",
-                    account_id,
-                    account_available_balance,
-                    balance_to_burn,
-                    &self.metadata.get().unwrap().symbol,
-                );
-            }
-        }
-    }
-}
-
-// * VIEW methods *
-#[near_bindgen]
-impl Contract {
-    /// Show the current exchange price
-    pub fn exchange_price(&self) -> U128 {
-        self.exchange_price_in_yocto_near
-    }
-}
-
-// * PUBLIC methods *
-#[near_bindgen]
-impl Contract {
-    /// Exchange NEAR tokens for FT tokens based on current exchange price
-    #[payable]
-    pub fn buy_ft_tokens(&mut self) {
-        let attached_deposit = env::attached_deposit();
-        let signer_account_id = env::signer_account_id();
-        // Calculate how many ft_tokens signer can get in exchange for the attached_deposit
-        let affordable_amount: u128 = attached_deposit / self.exchange_price_in_yocto_near.0;
-
-        // Calculate surplus that should be refunded
-        let surplus: u128 = attached_deposit - (affordable_amount * self.exchange_price_in_yocto_near.0);
-        // Transfer bought ft_tokens to the signer
-        self.token.internal_transfer(&self.owner_id, &signer_account_id, affordable_amount, None);
-
-        // Send spent yoctoNEARs to the treasury (self.owner_id)
-        Promise::new(self.owner_id.clone()).transfer(attached_deposit - surplus);
-        // Refund surplus yoctoNEARs to the signer
-        Promise::new(signer_account_id.clone()).transfer(surplus);
-        log!(
-            "Account @{} has bought {} ${} tokens. Refunded {} yoctoNEARS",
-            signer_account_id,
-            affordable_amount,
-            &self.metadata.get().unwrap().symbol,
-            surplus,
-        );
-    }
-}
-
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
