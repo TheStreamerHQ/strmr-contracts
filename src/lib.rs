@@ -26,6 +26,7 @@ use near_sdk::{env, log, near_bindgen, ext_contract, AccountId, Balance, PanicOn
 
 mod owner;
 mod public;
+mod subscriptions;
 mod view;
 
 near_sdk::setup_alloc!();
