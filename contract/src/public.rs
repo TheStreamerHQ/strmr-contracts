@@ -36,15 +36,40 @@ impl Contract {
     ) {
         let signer_account_id = env::signer_account_id();
         let mut subscription_list = self.get_or_create_user_subscription_list(&signer_account_id);
-        let subscription_id = env::random_seed().get(0).unwrap().to_string();
+        let subscription_id = subscription_list
+                .iter()
+                .map(|subscription| subscription.id)
+                .max()
+                .unwrap_or(0) + 1;
         let new_user_subscription = subscriptions::UserSubscription {
-            id: subscription_id.to_string(),
+            id: subscription_id,
             enabled: true,
             endpoint,
             event,
         };
         subscription_list.push(new_user_subscription);
         self.subscriptions.insert(&signer_account_id, &subscription_list);
+    }
+
+    pub fn delete_subscription(
+        &mut self,
+        id: u8,
+    ) {
+        let signer_account_id = env::signer_account_id();
+        let mut subscription_list = self.get_or_create_user_subscription_list(&signer_account_id);
+        let index_of_subscription_to_delete = subscription_list
+            .iter()
+            .position(|subscription| subscription.id == id);
+        if let Some(index) = index_of_subscription_to_delete {
+            subscription_list.remove(index);
+            self.subscriptions.insert(&signer_account_id, &subscription_list);
+        } else {
+            panic!(
+                "Account {} doesn't have the Subscription with id {}",
+                &signer_account_id,
+                id,
+            );
+        }
     }
 }
 

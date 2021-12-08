@@ -7,7 +7,7 @@ use crate::*;
 #[serde(crate = "near_sdk::serde")]
 pub struct UserSubscription {
     /// Generated uuid
-    pub id: String,
+    pub id: u8,
     /// Defines if the subscription is action
     pub enabled: bool,
     /// Endcoded webhook address
