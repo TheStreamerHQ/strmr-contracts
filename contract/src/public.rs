@@ -7,7 +7,11 @@ impl Contract {
     pub fn buy_ft_tokens(&mut self) {
         let attached_deposit = env::attached_deposit();
         let signer_account_id = env::signer_account_id();
-        self.token.internal_register_account(&signer_account_id);
+
+        if self.token.accounts.get(&signer_account_id).is_none() {
+            self.token.internal_register_account(&signer_account_id);
+        }
+
         // Calculate how many ft_tokens signer can get in exchange for the attached_deposit
         let affordable_amount: u128 = attached_deposit / self.exchange_price_in_yocto_near.0;
 
